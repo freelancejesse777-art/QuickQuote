@@ -553,6 +553,56 @@ app.get('/', (req, res) => {
   res.send('Intake AI phone backend is running. Point a Twilio number at /voice/hvac, /voice/dental, or /voice/electrician.');
 });
 
+// ---------------------------------------------------
+// Claude proxy for QuickQuote (and any other browser-based app on this
+// project). Lets the app call Claude without the end customer ever
+// needing their own Anthropic API key — this server holds the real key
+// and the browser just calls this endpoint instead of api.anthropic.com
+// directly. CORS is open (*) since this is called from a public static
+// site (GitHub Pages) with no login system of its own.
+// ---------------------------------------------------
+app.options('/api/claude', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(200);
+});
+
+app.post('/api/claude', async (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+
+  if (!ANTHROPIC_API_KEY) {
+    return res.status(500).json({ error: { message: 'Server is not configured with an Anthropic API key.' } });
+  }
+
+  const { system, messages, max_tokens } = req.body || {};
+  if (!messages) {
+    return res.status(400).json({ error: { message: 'Missing "messages" in request body.' } });
+  }
+
+  try {
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: max_tokens || 2500,
+        system,
+        messages
+      })
+    });
+    const data = await anthropicRes.json();
+    res.status(anthropicRes.status).json(data);
+  } catch (e) {
+    console.error('[api/claude] Request failed:', e.message);
+    res.status(500).json({ error: { message: 'Proxy request failed.' } });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Intake AI phone backend listening on port ${PORT}`);
 });
