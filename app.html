@@ -264,7 +264,6 @@
     <div class="tab" data-tab="history">Quote History</div>
     <div class="tab" data-tab="captions">New Caption</div>
     <div class="tab" data-tab="captionlog">Caption Log</div>
-    <div class="tab" data-tab="outreach">Get Clients</div>
   </div>
 
   <!-- BUSINESS SETUP -->
@@ -474,57 +473,6 @@
         <button class="core btn-secondary" id="capModalCopyBtn">Copy caption + hashtags</button>
         <button class="core btn-secondary" id="capModalCloseBtn2">Close</button>
         <button class="core btn-ghost" id="capModalDeleteBtn" style="margin-left:auto;color:var(--stamp);border-color:var(--stamp-dim);">Delete</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- OUTREACH -->
-  <div class="tab-panel" id="tab-outreach">
-    <div class="card">
-      <div class="card-title">Find real prospects</div>
-      <div class="card-sub">
-        Searches real, live business listings using your connected Google Places key. Returns name, phone, and website — Google's business data doesn't include email addresses, so those you'll still need to look up per business (their site's Contact page or Facebook page usually has one).
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Trade</label><input type="text" id="leadTrade" placeholder="e.g. plumbers, roofers, pest control"></div>
-        <div class="field"><label>Location</label><input type="text" id="leadLocation" placeholder="e.g. Brooksville, FL"></div>
-      </div>
-      <button class="core btn-primary" id="findLeadsBtn">Find prospects</button>
-      <span class="ai-status" id="leadFinderStatus"></span>
-      <div id="leadResults" style="margin-top:14px;"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Send this to prospects</div>
-      <div class="card-sub">Swap in a name and trade, then text or email it. Edit any of these to fit your own voice.</div>
-
-      <div class="field">
-        <label>Direct &amp; casual</label>
-        <textarea id="outreachMsg1" style="width:100%;min-height:80px;background:#fff;border:1px solid var(--line);border-radius:3px;padding:9px 11px;font-family:'Inter',sans-serif;font-size:13px;">Hey [name] — built a tool that turns a quick job description into a branded, ready-to-send estimate PDF in under a minute, using your own pricing. No more writing quotes by hand at night. Takes 2 min to try, no signup needed. Want me to send the link?</textarea>
-        <button class="core btn-secondary outreach-copy-btn" data-target="outreachMsg1" style="margin-top:8px;">Copy</button>
-      </div>
-
-      <div class="field" style="margin-top:18px;">
-        <label>Lead with a question</label>
-        <textarea id="outreachMsg2" style="width:100%;min-height:90px;background:#fff;border:1px solid var(--line);border-radius:3px;padding:9px 11px;font-family:'Inter',sans-serif;font-size:13px;">Quick question — how are you handling job estimates right now? Built something that lets you type a quick job description and it spits out a branded, professional quote PDF using your own price list, in under a minute. Happy to show you — takes 2 minutes, no cost to look.</textarea>
-        <button class="core btn-secondary outreach-copy-btn" data-target="outreachMsg2" style="margin-top:8px;">Copy</button>
-      </div>
-
-      <div class="field" style="margin-top:18px;">
-        <label>Short &amp; low-pressure</label>
-        <textarea id="outreachMsg3" style="width:100%;min-height:60px;background:#fff;border:1px solid var(--line);border-radius:3px;padding:9px 11px;font-family:'Inter',sans-serif;font-size:13px;">Hey [name], made a quick tool for [trade] contractors — turns a job description into a ready-to-send estimate PDF fast. No signup to try it. Want the link?</textarea>
-        <button class="core btn-secondary outreach-copy-btn" data-target="outreachMsg3" style="margin-top:8px;">Copy</button>
-      </div>
-
-      <span class="ai-status" id="outreachCopyStatus" style="display:block;margin-top:14px;"></span>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Who to send it to</div>
-      <div class="card-sub">
-        Best fits: solo operators or small 2–5 person crews in trades with variable, describe-the-job pricing — HVAC, plumbing, electrical, roofing, pest control. Skip large companies (they already have office software) and businesses doing under ~2 quotes a week (not enough volume to feel the pain).
-        <br><br>
-        Best channels for small/local markets specifically: people you already know in the trades (strongest), local Facebook groups and Nextdoor (often more active than Reddit for small towns), direct text/email to businesses you find above. Reddit works better for larger metro areas — check r/[your city] or r/[your trade] to see if there's real activity before relying on it.
       </div>
     </div>
   </div>
@@ -1916,81 +1864,6 @@ async function checkApiStatus(){
     return false;
   }
 }
-
-/* ---------- LEAD FINDER ---------- */
-el('findLeadsBtn').addEventListener('click', async ()=>{
-  const trade = el('leadTrade').value.trim();
-  const location = el('leadLocation').value.trim();
-  const statusEl = el('leadFinderStatus');
-  const resultsEl = el('leadResults');
-
-  if(!trade || !location){ statusEl.textContent = 'Enter both a trade and a location.'; return; }
-  if(!currentApiKey){ statusEl.textContent = 'Connect your Google Places API key at the top of the page first.'; return; }
-
-  el('findLeadsBtn').disabled = true;
-  el('findLeadsBtn').textContent = 'Searching…';
-  statusEl.textContent = '';
-  resultsEl.innerHTML = '';
-
-  try{
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': currentApiKey,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount'
-      },
-      body: JSON.stringify({ textQuery: `${trade} near ${location}` })
-    });
-    if(!res.ok){
-      const errBody = await res.json().catch(()=>({}));
-      const msg = errBody?.error?.message || `Request failed (${res.status})`;
-      throw new Error(msg.includes('not been used') || msg.includes('disabled')
-        ? `${msg} — make sure "Places API (New)" is enabled in Google Cloud Console.`
-        : msg);
-    }
-    const data = await res.json();
-    const places = data.places || [];
-    if(places.length === 0){
-      statusEl.textContent = 'No results — try a broader location or different trade wording.';
-    } else {
-      resultsEl.innerHTML = places.map(p => `
-        <div class="history-card" style="cursor:default;margin-bottom:8px;">
-          <div class="history-card-left">
-            <b>${escapeHtml(p.displayName?.text || 'Unnamed business')}</b>
-            <div class="hc-sub">
-              ${p.nationalPhoneNumber ? escapeHtml(p.nationalPhoneNumber) : 'no phone listed'}
-              ${p.rating ? ` · ${p.rating}★ (${p.userRatingCount||0})` : ''}
-              ${p.formattedAddress ? ' · ' + escapeHtml(p.formattedAddress) : ''}
-            </div>
-          </div>
-          ${p.websiteUri ? `<a href="${escapeAttr(p.websiteUri)}" target="_blank" rel="noopener" class="core btn-secondary" style="text-decoration:none;font-size:12px;padding:8px 12px;">Visit site</a>` : ''}
-        </div>
-      `).join('');
-      statusEl.textContent = `Found ${places.length} result${places.length===1?'':'s'}. Click "Visit site" to find an email on their Contact page — Google's data doesn't include emails directly.`;
-    }
-  } catch(e){
-    console.error('Lead search failed:', e);
-    statusEl.textContent = 'Failed: ' + (e.message || 'unknown error');
-  }
-  el('findLeadsBtn').disabled = false;
-  el('findLeadsBtn').textContent = 'Find prospects';
-});
-
-/* ---------- OUTREACH COPY BUTTONS ---------- */
-document.querySelectorAll('.outreach-copy-btn').forEach(btn=>{
-  btn.addEventListener('click', async ()=>{
-    const text = el(btn.dataset.target).value;
-    try{
-      await navigator.clipboard.writeText(text);
-      el('outreachCopyStatus').textContent = 'Copied to clipboard ✓';
-    } catch(e){
-      el(btn.dataset.target).select();
-      el('outreachCopyStatus').textContent = 'Could not auto-copy — text is selected, use Ctrl/Cmd+C.';
-    }
-    setTimeout(()=>{ if(el('outreachCopyStatus').textContent.includes('✓')) el('outreachCopyStatus').textContent = ''; }, 2000);
-  });
-});
 
 /* ---------- INIT ---------- */
 (async ()=>{

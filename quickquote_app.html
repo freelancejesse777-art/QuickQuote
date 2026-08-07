@@ -249,13 +249,6 @@
     <div class="status-chip" id="apiStatus">checking connection…</div>
   </div>
 
-  <div class="places-key-bar" id="claudeKeyRow" style="display:none;">
-    <span class="places-key-label">Claude API key (needed outside Claude chat)</span>
-    <input type="text" id="claudeApiKeyInput" placeholder="Paste your Anthropic API key…" />
-    <button class="core btn-secondary" id="connectClaudeBtn">Connect</button>
-    <span class="ai-status" id="claudeKeyStatus" style="margin:0;"></span>
-  </div>
-
   <div class="places-key-bar" id="placesKeyRow">
     <span class="places-key-label">Address autocomplete (optional)</span>
     <input type="text" id="placesApiKeyInput" placeholder="Paste your Google Places API key…" />
@@ -811,10 +804,6 @@ el('bulkParseBtn').addEventListener('click', async ()=>{
   const text = el('bulkPasteInput').value.trim();
   const statusEl = el('bulkParseStatus');
   if(!text){ statusEl.textContent = 'Paste some price list text first.'; return; }
-  if(!hasClaudeStorage && !claudeApiKey){
-    statusEl.textContent = 'Connect your Claude API key at the top of the page first.';
-    return;
-  }
 
   el('bulkParseBtn').disabled = true;
   el('bulkParseBtn').textContent = 'Reading…';
@@ -932,30 +921,38 @@ el('taxRate').addEventListener('input', ()=>{ updateTotals(); renderPreview(); }
 });
 
 /* ---------- AI SUGGEST ---------- */
-let claudeApiKey = '';
+// ⚠️ Set this to your actual Railway deployment URL — this is what lets
+// the app work for real customers without them ever needing their own
+// Claude API key. Uses Claude's own connection when viewed inside Claude
+// chat, and this proxy otherwise.
+const CLAUDE_PROXY_URL = 'https://frontdesk-ai-production-4ac4.up.railway.app/api/claude';
 
 async function callClaude(system, userText){
-  const headers = {'Content-Type':'application/json'};
-  if(!hasClaudeStorage){
-    // Standalone file, not inside Claude's chat interface — needs an
-    // explicit key and Anthropic's special header that allows a direct
-    // browser request (normally blocked by CORS for safety).
-    if(!claudeApiKey){
-      throw new Error('Paste your Claude API key at the top of the page first.');
-    }
-    headers['x-api-key'] = claudeApiKey;
-    headers['anthropic-version'] = '2023-06-01';
-    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  let res;
+  if(hasClaudeStorage){
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6', max_tokens:2500,
+        system,
+        messages: [{role:'user', content: userText}]
+      })
+    });
+  } else {
+    // Standalone (e.g. a real customer using the deployed app) — goes
+    // through our own server instead of calling Anthropic directly, so
+    // no API key is ever needed on the customer's end.
+    res = await fetch(CLAUDE_PROXY_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        max_tokens:2500,
+        system,
+        messages: [{role:'user', content: userText}]
+      })
+    });
   }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST',
-    headers,
-    body: JSON.stringify({
-      model:'claude-sonnet-4-6', max_tokens:2500,
-      system,
-      messages: [{role:'user', content: userText}]
-    })
-  });
   const data = await res.json();
   if(!res.ok){
     const msg = data?.error?.message || `Request failed (${res.status})`;
@@ -1012,10 +1009,6 @@ el('generateCaptionsBtn').addEventListener('click', async ()=>{
   const desc = el('capJobDescription').value.trim();
   const statusEl = el('capGenerateStatus');
   if(!desc){ statusEl.textContent = 'Describe the job or post first.'; return; }
-  if(!hasClaudeStorage && !claudeApiKey){
-    statusEl.textContent = 'Paste your Claude API key at the top of the page and click Connect first.';
-    return;
-  }
 
   el('generateCaptionsBtn').disabled = true;
   el('generateCaptionsBtn').textContent = 'Writing…';
@@ -1232,10 +1225,6 @@ el('aiSuggestBtn').addEventListener('click', async ()=>{
   if(!desc){ statusEl.textContent = 'Describe the job first.'; return; }
   if(priceItems.filter(p=>p.name && p.name.trim()).length === 0){
     statusEl.textContent = 'Your price list is empty — go to the Price List tab and add at least one item first.';
-    return;
-  }
-  if(!hasClaudeStorage && !claudeApiKey){
-    statusEl.textContent = 'Paste your Claude API key at the top of the page and click Connect first.';
     return;
   }
 
@@ -1909,22 +1898,11 @@ attachAddressAutocomplete(el('custAddress'));
   } catch(e){}
 })();
 
-/* ---------- CLAUDE API KEY (standalone mode only) ---------- */
-el('connectClaudeBtn').addEventListener('click', async ()=>{
-  const key = el('claudeApiKeyInput').value.trim();
-  if(!key){ el('claudeKeyStatus').textContent = 'Paste a key first.'; return; }
-  claudeApiKey = key;
-  try{ await storageSet('claude_api_key', key, false); }catch(e){}
-  el('claudeKeyStatus').textContent = 'Saved — checking connection…';
-  await checkApiStatus();
-});
-
 async function checkApiStatus(){
   try{
     await callClaude('Reply with exactly this JSON and nothing else: {"ok": true}', 'ping');
     el('apiStatus').textContent = 'agent ready';
     el('apiStatus').style.color = 'var(--good)';
-    if(!hasClaudeStorage) el('claudeKeyStatus').textContent = 'Connected ✓';
     el('aiConnIndicator').textContent = '● AI connected — ready to generate quotes';
     el('aiConnIndicator').style.background = 'var(--pine-dim)';
     el('aiConnIndicator').style.color = 'var(--pine)';
@@ -1932,8 +1910,7 @@ async function checkApiStatus(){
   }catch(e){
     el('apiStatus').textContent = 'connection issue';
     el('apiStatus').style.color = 'var(--stamp)';
-    if(!hasClaudeStorage) el('claudeKeyStatus').textContent = e.message;
-    el('aiConnIndicator').textContent = '● Not connected — ' + (hasClaudeStorage ? e.message : 'add your Claude API key at the top of the page');
+    el('aiConnIndicator').textContent = '● Not connected — ' + e.message;
     el('aiConnIndicator').style.background = 'var(--stamp-dim)';
     el('aiConnIndicator').style.color = 'var(--stamp)';
     return false;
@@ -2022,18 +1999,6 @@ document.querySelectorAll('.outreach-copy-btn').forEach(btn=>{
   renderLineItems();
   updateTotals();
   renderPreview();
-
-  if(!hasClaudeStorage){
-    el('claudeKeyRow').style.display = 'flex';
-    try{
-      const saved = await storageGet('claude_api_key', false);
-      if(saved && saved.value){
-        claudeApiKey = saved.value;
-        el('claudeApiKeyInput').value = saved.value;
-      }
-    } catch(e){}
-  }
-
   await checkApiStatus();
 })();
 </script>
