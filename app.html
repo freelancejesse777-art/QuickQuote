@@ -877,7 +877,7 @@ el('taxRate').addEventListener('input', ()=>{ updateTotals(); renderPreview(); }
 // the app work for real customers without them ever needing their own
 // Claude API key. Uses Claude's own connection when viewed inside Claude
 // chat, and this proxy otherwise.
-const CLAUDE_PROXY_URL = 'https://frontdesk-ai-production-4ac4.up.railway.app/api/claude';
+const CLAUDE_PROXY_URL = 'https://quickquote-production.up.railway.app/api/claude';
 
 async function callClaude(system, userText){
   let res;
