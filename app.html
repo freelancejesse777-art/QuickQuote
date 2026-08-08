@@ -249,14 +249,6 @@
     <div class="status-chip" id="apiStatus">checking connection…</div>
   </div>
 
-  <div class="places-key-bar" id="placesKeyRow">
-    <span class="places-key-label">Address autocomplete (optional)</span>
-    <input type="text" id="placesApiKeyInput" placeholder="Paste your Google Places API key…" />
-    <button class="core btn-secondary" id="connectPlacesBtn">Connect</button>
-    <button class="core btn-ghost" id="forgetPlacesBtn" title="Remove the saved key from this device">Forget key</button>
-    <span class="ai-status" id="placesStatus" style="margin:0;">Not connected — address fields still work with manual typing</span>
-  </div>
-
   <div class="tabs">
     <div class="tab active" data-tab="setup">My Business</div>
     <div class="tab" data-tab="pricing">Price List</div>
@@ -1642,90 +1634,13 @@ document.addEventListener('keydown', (e)=>{
   if(el('captionModalOverlay').style.display === 'flex') closeCaptionModal();
 });
 
-/* ---------- ADDRESS AUTOCOMPLETE (Google Places) ---------- */
-const placesApiKeyInput = el('placesApiKeyInput');
-const connectPlacesBtn = el('connectPlacesBtn');
-const placesStatus = el('placesStatus');
-let currentApiKey = '';
-
-function attachBusinessAutocomplete(nameInput, { addressInput, phoneInput } = {}){
-  const dropdown = document.createElement('div');
-  dropdown.className = 'places-dropdown';
-  nameInput.parentElement.style.position = 'relative';
-  nameInput.parentElement.appendChild(dropdown);
-
-  let searchTimer = null;
-  function hide(){ dropdown.style.display = 'none'; }
-
-  async function fillFromPlace(placeId, fallbackName){
-    if(!placeId){ nameInput.value = fallbackName; return; }
-    try{
-      const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-        headers: {
-          'X-Goog-Api-Key': currentApiKey,
-          'X-Goog-FieldMask': 'displayName,formattedAddress,internationalPhoneNumber'
-        }
-      });
-      if(!res.ok){ nameInput.value = fallbackName; return; }
-      const place = await res.json();
-      nameInput.value = place.displayName?.text || fallbackName;
-      if(addressInput && place.formattedAddress) addressInput.value = place.formattedAddress;
-      if(phoneInput && place.internationalPhoneNumber) phoneInput.value = place.internationalPhoneNumber;
-      nameInput.dispatchEvent(new Event('input'));
-      if(addressInput) addressInput.dispatchEvent(new Event('input'));
-      if(phoneInput) phoneInput.dispatchEvent(new Event('input'));
-    } catch(e){
-      nameInput.value = fallbackName;
-    }
-  }
-
-  function render(suggestions){
-    dropdown.innerHTML = '';
-    if(!suggestions.length){ hide(); return; }
-    suggestions.forEach(s=>{
-      const pred = s.placePrediction;
-      if(!pred) return;
-      const item = document.createElement('div');
-      item.className = 'places-dropdown-item';
-      const mainText = pred.structuredFormat?.mainText?.text || pred.text?.text || '';
-      const secondaryText = pred.structuredFormat?.secondaryText?.text || '';
-      item.innerHTML = `<div class="pdi-main">${mainText}</div>${secondaryText ? `<div class="pdi-sub">${secondaryText}</div>` : ''}`;
-      item.addEventListener('mousedown', (e)=>{
-        e.preventDefault();
-        hide();
-        fillFromPlace(pred.placeId, mainText);
-      });
-      dropdown.appendChild(item);
-    });
-    dropdown.style.display = 'block';
-  }
-
-  async function search(query){
-    if(!currentApiKey || !query || query.length < 2){ hide(); return; }
-    try{
-      const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': currentApiKey,
-          'X-Goog-FieldMask': 'suggestions.placePrediction.text,suggestions.placePrediction.placeId,suggestions.placePrediction.structuredFormat'
-        },
-        body: JSON.stringify({ input: query, includedPrimaryTypes: ['establishment'] })
-      });
-      if(!res.ok){ hide(); return; }
-      const data = await res.json();
-      render(data.suggestions || []);
-    } catch(e){ hide(); }
-  }
-
-  nameInput.addEventListener('input', (e)=>{
-    if(e.isTrusted === false) return; // skip the synthetic event we fire after autofill
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(()=> search(nameInput.value.trim()), 300);
-  });
-  nameInput.addEventListener('blur', ()=> setTimeout(hide, 150));
-}
-
+/* ---------- ADDRESS AUTOCOMPLETE (Photon — free, no API key needed) ----------
+   Uses Photon (photon.komoot.io), a free geocoding service built on
+   OpenStreetMap data. No signup, no key, no card — works immediately
+   for anyone who opens this app. The one honest tradeoff versus the
+   old Google Places version: this only autocompletes addresses, not
+   business names with an auto-filled phone number, since that level
+   of business-directory data isn't available for free anywhere. */
 function attachAddressAutocomplete(inputEl){
   const dropdown = document.createElement('div');
   dropdown.className = 'places-dropdown';
@@ -1733,23 +1648,28 @@ function attachAddressAutocomplete(inputEl){
   inputEl.parentElement.appendChild(dropdown);
 
   let searchTimer = null;
-
   function hide(){ dropdown.style.display = 'none'; }
 
-  function render(suggestions){
+  function formatFeature(f){
+    const p = f.properties || {};
+    const mainParts = [p.housenumber, p.street || p.name].filter(Boolean);
+    const main = mainParts.length ? mainParts.join(' ') : (p.name || 'Unknown location');
+    const secondaryParts = [p.city, p.state, p.postcode].filter(Boolean);
+    const secondary = secondaryParts.join(', ');
+    return { main, secondary, full: secondary ? `${main}, ${secondary}` : main };
+  }
+
+  function render(features){
     dropdown.innerHTML = '';
-    if(!suggestions.length){ hide(); return; }
-    suggestions.forEach(s=>{
-      const pred = s.placePrediction;
-      if(!pred) return;
+    if(!features.length){ hide(); return; }
+    features.forEach(f=>{
+      const { main, secondary, full } = formatFeature(f);
       const item = document.createElement('div');
       item.className = 'places-dropdown-item';
-      const mainText = pred.structuredFormat?.mainText?.text || pred.text?.text || '';
-      const secondaryText = pred.structuredFormat?.secondaryText?.text || '';
-      item.innerHTML = `<div class="pdi-main">${mainText}</div>${secondaryText ? `<div class="pdi-sub">${secondaryText}</div>` : ''}`;
+      item.innerHTML = `<div class="pdi-main">${main}</div>${secondary ? `<div class="pdi-sub">${secondary}</div>` : ''}`;
       item.addEventListener('mousedown', (e)=>{
         e.preventDefault();
-        inputEl.value = secondaryText ? `${mainText}, ${secondaryText}` : mainText;
+        inputEl.value = full;
         inputEl.dispatchEvent(new Event('input'));
         hide();
       });
@@ -1759,96 +1679,25 @@ function attachAddressAutocomplete(inputEl){
   }
 
   async function search(query){
-    if(!currentApiKey || !query || query.length < 3){ hide(); return; }
+    if(!query || query.length < 3){ hide(); return; }
     try{
-      const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': currentApiKey,
-          'X-Goog-FieldMask': 'suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat'
-        },
-        body: JSON.stringify({ input: query })
-      });
+      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5`);
       if(!res.ok){ hide(); return; }
       const data = await res.json();
-      render(data.suggestions || []);
+      render(data.features || []);
     } catch(e){ hide(); }
   }
 
   inputEl.addEventListener('input', (e)=>{
-    if(e.isTrusted === false) return; // skip the synthetic event fired after autofill from a business selection
+    if(e.isTrusted === false) return;
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(()=> search(inputEl.value.trim()), 300);
+    searchTimer = setTimeout(()=> search(inputEl.value.trim()), 350);
   });
   inputEl.addEventListener('blur', ()=> setTimeout(hide, 150));
 }
 
-async function connectPlacesKey(key, { save } = { save: true }){
-  connectPlacesBtn.disabled = true;
-  connectPlacesBtn.textContent = 'Checking…';
-  try{
-    const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': key,
-        'X-Goog-FieldMask': 'suggestions.placePrediction.text'
-      },
-      body: JSON.stringify({ input: 'test' })
-    });
-    if(!res.ok){
-      const errBody = await res.json().catch(()=>({}));
-      const msg = errBody?.error?.message || `Request failed (${res.status})`;
-      throw new Error(
-        msg.includes('API_KEY') || msg.includes('not been used') || msg.includes('disabled')
-          ? `${msg} — in Google Cloud Console, make sure "Places API (New)" is enabled.`
-          : msg
-      );
-    }
-    currentApiKey = key;
-    placesStatus.textContent = 'Connected — address fields will now suggest real addresses as you type.';
-    connectPlacesBtn.textContent = 'Connected ✓';
-    if(save){
-      try{ await storageSet('places_api_key', key, false); }catch(e){}
-    }
-  } catch(e){
-    placesStatus.textContent = e.message;
-    connectPlacesBtn.disabled = false;
-    connectPlacesBtn.textContent = 'Connect';
-  }
-}
-
-connectPlacesBtn.addEventListener('click', ()=>{
-  const key = placesApiKeyInput.value.trim();
-  if(!key){ placesStatus.textContent = 'Paste a Google Places API key first.'; return; }
-  connectPlacesKey(key);
-});
-
-el('forgetPlacesBtn').addEventListener('click', async ()=>{
-  try{ await storageDelete('places_api_key', false); }catch(e){}
-  placesApiKeyInput.value = '';
-  currentApiKey = '';
-  placesStatus.textContent = 'Saved key removed from this device.';
-  connectPlacesBtn.disabled = false;
-  connectPlacesBtn.textContent = 'Connect';
-});
-
-attachBusinessAutocomplete(el('bizName'), { addressInput: el('bizAddress'), phoneInput: el('bizPhone') });
-attachBusinessAutocomplete(el('custName'), { addressInput: el('custAddress'), phoneInput: el('custContact') });
 attachAddressAutocomplete(el('bizAddress'));
 attachAddressAutocomplete(el('custAddress'));
-
-(async ()=>{
-  try{
-    const saved = await storageGet('places_api_key', false);
-    if(saved && saved.value){
-      placesApiKeyInput.value = saved.value;
-      placesStatus.textContent = 'Found a saved key — reconnecting…';
-      await connectPlacesKey(saved.value, { save: false });
-    }
-  } catch(e){}
-})();
 
 async function checkApiStatus(){
   try{
